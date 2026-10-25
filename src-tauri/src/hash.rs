@@ -1,3 +1,4 @@
+use ffmpeg_next as ffmpeg;
 use image::{DynamicImage, ImageBuffer, Luma, Rgba};
 use image::imageops::{resize, FilterType};
 use std::io::Cursor;
@@ -252,3 +253,242 @@ pub fn triple_match(
         && hamming_distance(dhash1, dhash2) <= 5
         && hamming_distance(phash1, phash2) <= 5
 }
+
+// Video hashing functions — added by Plan 03-02
+
+/// Hash triplet for a single frame: [aHash, dHash, pHash].
+pub type FrameHash = [[u8; 8]; 3];
+
+/// Compute hashes for a file on disk, dispatching to image or video hashing.
+///
+/// Uses the file extension to determine the correct hashing path:
+/// - Images: calls compute_hashes() directly with raw bytes
+/// - Videos: extracts frames via FFmpeg, uses median frame's hash as canonical
+///
+/// Requires: ffmpeg-next installed (Plan 03-03).
+pub fn compute_hashes_for_file(
+    path: &str,
+    file_type: crate::scan::FileType,
+) -> Result<crate::scan::FileHash, String> {
+    let bytes = std::fs::read(path).map_err(|e| {
+        format!("Failed to read file {}: {}", path, e)
+    })?;
+    let size = bytes.len() as u64;
+
+    match file_type {
+        crate::scan::FileType::Video => {
+            let frames = compute_hashes_for_video(path)?;
+            let canonical = video_canonical_hash(&frames);
+            Ok(crate::scan::FileHash {
+                path: path.to_string(),
+                ahash: canonical[0],
+                dhash: canonical[1],
+                phash: canonical[2],
+                size,
+            })
+        }
+        crate::scan::FileType::Image => {
+            let [ahash, dhash, phash] = compute_hashes(&bytes)?;
+            Ok(crate::scan::FileHash {
+                path: path.to_string(),
+                ahash,
+                dhash,
+                phash,
+                size,
+            })
+        }
+    }
+}
+
+/// Maximum number of frames to extract from a video.
+const MAX_VIDEO_FRAMES: usize = 20;
+
+/// Scale a single FFmpeg video frame to 32x32 grayscale.
+fn scale_frame_to_32x32(frame: &ffmpeg::frame::Video) -> Result<DynamicImage, String> {
+    let (src_w, src_h) = (frame.width(), frame.height());
+    let src_format = frame.format();
+
+    let mut scaler = ffmpeg::software::scaler(
+        src_format,
+        ffmpeg::software::scaling::Flags::BILINEAR,
+        (src_w, src_h),
+        (32, 32),
+    ).map_err(|e| format!("Failed to create scaler: {}", e))?;
+
+    let mut scaled = ffmpeg::frame::Video::new(
+        ffmpeg::format::Pixel::GRAY8,
+        32,
+        32,
+    );
+    scaler.run(frame, &mut scaled).map_err(|e| format!("Failed to scale frame: {}", e))?;
+
+    let bytes: Vec<u8> = scaled.data(0).to_vec();
+    let buf = image::ImageBuffer::from_raw(32, 32, bytes).ok_or(
+        "Invalid frame dimensions".to_string(),
+    )?;
+    Ok(DynamicImage::ImageLuma8(buf))
+}
+
+/// Compute perceptual hashes for each frame of a video file.
+///
+/// Extracts frames at 5-second intervals using ffmpeg-next, converts
+/// each to grayscale, and computes triple-perceptual-hash (same as images).
+///
+/// Falls back to first frame only if no frames can be extracted (D-07).
+///
+/// Requires: ffmpeg-next installed (Plan 03-03).
+pub fn compute_hashes_for_video(path: &str) -> Result<Vec<FrameHash>, String> {
+    ffmpeg::init().map_err(|e| format!("FFmpeg init failed: {}", e))?;
+
+    let mut input = ffmpeg::format::input(path).map_err(|e| {
+        format!("Failed to open video {}: {}", path, e)
+    })?;
+
+    // Find the best video stream
+    let stream = input.streams().best(ffmpeg::media::Type::Video).ok_or(
+        "No video stream found in {}".to_string(),
+    )?;
+
+    let video_stream_id = stream.id();
+
+    // Open decoder from stream codec parameters (FFmpeg 7+ compatibility)
+    let ctx = ffmpeg::codec::Context::from_parameters(stream.parameters()).map_err(|e| {
+        format!("Failed to create decoder context: {}", e)
+    })?;
+    let mut decoder = ctx.decoder().video().map_err(|e| {
+        format!("Failed to open video decoder: {}", e)
+    })?;
+
+    // Get time base for frame interval calculation
+    let time_base = stream.time_base();
+    let rate = stream.rate();
+
+    // Compute frame interval: 5 seconds in time_base units
+    let interval = if time_base.denominator() != 0 && time_base.numerator() != 0 {
+        5_i64 * time_base.denominator() as i64 / time_base.numerator() as i64
+    } else {
+        // Fallback: use 5 seconds * stream rate
+        (5.0 * rate.numerator() as f64 / rate.denominator() as f64) as i64
+    };
+
+    let mut frames: Vec<FrameHash> = Vec::new();
+    let mut next_frame_pts: i64 = 0;
+
+    let mut pkt_iter = input.packets();
+    while let Some((stream_ref, packet)) = pkt_iter.next() {
+        if stream_ref.id() != video_stream_id {
+            continue;
+        }
+
+        decoder.send_packet(&packet).map_err(|e| {
+            format!("Failed to send packet to decoder: {}", e)
+        })?;
+
+        loop {
+            let mut frame = ffmpeg::frame::Video::empty();
+            match decoder.receive_frame(&mut frame) {
+                Ok(_) => {
+                    let pts = frame.pts().unwrap_or(0);
+                    if pts >= next_frame_pts && frames.len() < MAX_VIDEO_FRAMES {
+                        // Scale frame to 32x32 grayscale
+                        if let Ok(img) = scale_frame_to_32x32(&frame) {
+                            let a = compute_ahash(&img);
+                            let d = compute_dhash(&img);
+                            let p = compute_phash(&img);
+                            frames.push([a, d, p]);
+                        }
+                        next_frame_pts += interval;
+                    }
+
+                    if frames.len() >= MAX_VIDEO_FRAMES {
+                        return Ok(frames);
+                    }
+                }
+                Err(ffmpeg::Error::Eof) => break,
+                Err(_) => break,
+            }
+        }
+    }
+
+    // Fallback (D-07): if no frames extracted, try first frame only
+    if frames.is_empty() {
+        log::warn!("No frames extracted from {}, using first frame fallback", path);
+        if let Ok(first_frame) = extract_first_frame(path) {
+            frames.push(first_frame);
+        }
+    }
+
+    Ok(frames)
+}
+
+/// Extract the first frame of a video and return its hash triplet.
+fn extract_first_frame(path: &str) -> Result<FrameHash, String> {
+    let input = ffmpeg::format::input(path).map_err(|e| {
+        format!("Failed to open video {}: {}", path, e)
+    })?;
+
+    let stream = input.streams().best(ffmpeg::media::Type::Video).ok_or(
+        "No video stream found".to_string(),
+    )?;
+
+    // Open decoder from stream codec parameters (FFmpeg 7+ compatibility)
+    let ctx = ffmpeg::codec::Context::from_parameters(stream.parameters()).map_err(|e| {
+        format!("Failed to create decoder context: {}", e)
+    })?;
+    let mut decoder = ctx.decoder().video().map_err(|e| {
+        format!("Failed to open video decoder: {}", e)
+    })?;
+
+    // Flush decoder
+    decoder.send_eof().map_err(|e| {
+        format!("Failed to flush decoder: {}", e)
+    })?;
+
+    let mut frame = ffmpeg::frame::Video::empty();
+    decoder.receive_frame(&mut frame).map_err(|e| {
+        format!("Failed to receive first frame: {}", e)
+    })?;
+
+    let img = scale_frame_to_32x32(&frame)?;
+
+    Ok([compute_ahash(&img), compute_dhash(&img), compute_phash(&img)])
+}
+
+/// Compare two videos by their frame hash sets.
+///
+/// Per D-07: N >= 3 matching frames AND >= 50% of analyzed frames match.
+///
+/// A frame "matches" if triple_match returns true for the frame triplets.
+pub fn videos_match(frames1: &Vec<FrameHash>, frames2: &Vec<FrameHash>) -> bool {
+    if frames1.is_empty() || frames2.is_empty() {
+        return false;
+    }
+
+    let min_len = frames1.len().min(frames2.len());
+    let mut matches: usize = 0;
+
+    for i in 0..min_len {
+        if triple_match(
+            &frames1[i][0], &frames2[i][0],
+            &frames1[i][1], &frames2[i][1],
+            &frames1[i][2], &frames2[i][2],
+        ) {
+            matches += 1;
+        }
+    }
+
+    // N >= 3 matching frames AND >= 50% of analyzed frames match
+    matches >= 3 && (matches as f64) >= (min_len as f64) * 0.5
+}
+
+/// Compute a canonical hash for a video file (median frame hash).
+///
+/// Videos are grouped by their median frame's perceptual hash,
+/// then refined by frame-set comparison (videos_match).
+fn video_canonical_hash(frames: &Vec<FrameHash>) -> FrameHash {
+    if frames.is_empty() {
+        return [[0u8; 8]; 3];
+    }
+    frames[frames.len() / 2]
+}
+
