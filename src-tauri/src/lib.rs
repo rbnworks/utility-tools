@@ -2,10 +2,11 @@ use dashmap::DashMap;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::LazyLock;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use tauri::Emitter;
 
+use hash::compute_hashes_for_file;
 use scan::FileHash;
 
 pub mod scan;
@@ -29,6 +30,8 @@ pub struct ScanState {
     pub total_files: usize,
     pub scanned_files: usize,
     pub duplicate_groups: Vec<DuplicateGroup>,
+    #[serde(skip)]
+    pub abort_requested: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -92,6 +95,7 @@ async fn scan_folders(
         total_files: 0,
         scanned_files: 0,
         duplicate_groups: Vec::new(),
+        abort_requested: Arc::new(AtomicBool::new(false)),
     };
     SESSIONS.insert(session_id.clone(), state);
 
@@ -116,6 +120,37 @@ async fn scan_folders(
     let mut all_hashes: Vec<FileHash> = Vec::new();
 
     for (i, file) in files.iter().enumerate() {
+        // Check if cancellation was requested
+        {
+            let mut s = SESSIONS.get_mut(&session_id).ok_or("Session not found")?;
+            if s.abort_requested.load(Ordering::SeqCst) {
+                s.status = ScanStatus::Cancelled;
+                s.total_files = total;
+                s.scanned_files = i;
+
+                let _ = app.emit(
+                    "scan:progress",
+                    scan::ScanProgressEvent {
+                        scanned: i,
+                        total,
+                        file: String::new(),
+                    },
+                );
+                let _ = app.emit(
+                    "scan:cancelled",
+                    serde_json::json!({
+                        "session_id": session_id,
+                        "scanned": i,
+                        "total": total,
+                    }),
+                );
+                return Ok(SessionInfo {
+                    session_id,
+                    folder_count,
+                });
+            }
+        }
+
         // Emit progress event
         let _ = app.emit(
             "scan:progress",
@@ -138,10 +173,10 @@ async fn scan_folders(
                     hashed.clone()
                 } else {
                     drop(cache);
-                    compute_file_hash(&file.path)?
+                    compute_hashes_for_file(&file.path, file.file_type)?
                 }
             } else {
-                compute_file_hash(&file.path)?
+                compute_hashes_for_file(&file.path, file.file_type)?
             }
         };
 
@@ -223,6 +258,7 @@ async fn scan_folders(
 
 /// Compute all three perceptual hashes for a file on disk.
 /// Uses Rayon parallel computation for the three hash algorithms (D-04).
+/// Only handles images; use hash::compute_hashes_for_file() for video support.
 fn compute_file_hash(path: &str) -> Result<FileHash, String> {
     let bytes = std::fs::read(path).map_err(|e| {
         format!("Failed to read file {}: {}", path, e)
@@ -258,6 +294,50 @@ fn compute_file_hash(path: &str) -> Result<FileHash, String> {
     })
 }
 
+/// Lookup a session by its ID and return a clone of its state.
+pub fn get_session(session_id: &str) -> Option<ScanState> {
+    SESSIONS.get(session_id).map(|s| s.clone())
+}
+
+/// Cancel an in-progress scan by session ID (DF-SCAN-09).
+#[tauri::command]
+async fn cancel_scan(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<String, String> {
+    // Find session in DashMap
+    if let Some(mut entry) = SESSIONS.get_mut(&session_id) {
+        match &entry.status {
+            ScanStatus::Scanning => {
+                entry.status = ScanStatus::Cancelled;
+                entry.abort_requested.store(true, Ordering::SeqCst);
+                drop(entry);
+
+                // Emit scan:cancelled event with session_id
+                let _ = app.emit(
+                    "scan:cancelled",
+                    serde_json::json!({
+                        "session_id": session_id,
+                    }),
+                );
+
+                Ok("Scan cancelled".to_string())
+            }
+            ScanStatus::Complete | ScanStatus::Cancelled => {
+                Ok("Scan already finished".to_string())
+            }
+            ScanStatus::Error(_) => {
+                Ok("Scan already errored".to_string())
+            }
+            ScanStatus::Idle => {
+                Ok("No scan in progress".to_string())
+            }
+        }
+    } else {
+        Err("Session not found".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -274,7 +354,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![scan_folders])
+        .invoke_handler(tauri::generate_handler![scan_folders, cancel_scan])
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
 }
