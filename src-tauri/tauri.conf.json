@@ -17,12 +17,10 @@
         "height": 800,
         "minWidth": 800,
         "minHeight": 600,
-        "frameless": true,
+        "decorations": false,
         "resizable": true,
         "fullscreen": false,
-        "center": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "center": true
       }
     ],
     "security": {
