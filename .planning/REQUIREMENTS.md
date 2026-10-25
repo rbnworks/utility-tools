@@ -56,11 +56,11 @@
 
 ### Duplicate Detection — Matching
 
-- [ ] **HASH-01**: aHash computed by resizing to 8x8, comparing each pixel to mean brightness
-- [ ] **HASH-02**: dHash computed by resizing to 9x8, comparing adjacent pixel pairs
-- [ ] **HASH-03**: pHash computed by resizing to 32x32, DCT, comparing low-frequency components
-- [ ] **HASH-04**: Match threshold: Hamming distance ≤ 5 out of 64 bits per algorithm
-- [ ] **HASH-05**: Confirmed duplicate requires all three hash types to match within threshold
+- [x] **HASH-01**: aHash computed by resizing to 8x8, comparing each pixel to mean brightness
+- [x] **HASH-02**: dHash computed by resizing to 9x8, comparing adjacent pixel pairs
+- [x] **HASH-03**: pHash computed by resizing to 32x32, DCT, comparing low-frequency components
+- [x] **HASH-04**: Match threshold: Hamming distance ≤ 5 out of 64 bits per algorithm
+- [x] **HASH-05**: Confirmed duplicate requires all three hash types to match within threshold
 
 ## v2 Requirements
 
@@ -124,11 +124,11 @@
 | DF-ACTION-05 | Phase 5 | Pending |
 | DF-ACTION-06 | Phase 5 | Pending |
 | DF-ACTION-07 | Phase 5 | Pending |
-| HASH-01 | Phase 3 | Pending |
-| HASH-02 | Phase 3 | Pending |
-| HASH-03 | Phase 3 | Pending |
-| HASH-04 | Phase 3 | Pending |
-| HASH-05 | Phase 3 | Pending |
+| HASH-01 | Phase 3 | Complete |
+| HASH-02 | Phase 3 | Complete |
+| HASH-03 | Phase 3 | Complete |
+| HASH-04 | Phase 3 | Complete |
+| HASH-05 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 36 total

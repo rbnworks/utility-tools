@@ -78,10 +78,10 @@
 **Wave structure:** Wave 1 = 03-01 (core scanner), Wave 2 = 03-03 (scan.rs video support), Wave 3 = 03-02 (hash.rs video support), Wave 4 = 03-04 (combined lib.rs wiring)
 
 Plans:
-- [ ] 03-01-PLAN.md — Core scanner: file discovery, image hashing (aHash/dHash/pHash), progress events, duplicate grouping with triple-agreement matching
-- [ ] 03-03-PLAN.md — Video scan support: ffmpeg-next dependency, video extensions, FileType enum in scan.rs
-- [ ] 03-02-PLAN.md — Video hash support: ffmpeg frame extraction, per-frame hashing, videos_match(), compute_hashes_for_file()
-- [ ] 03-04-PLAN.md — lib.rs integration: video routing in scan command, DashMap session state, cancel command, session wiring
+- [x] 03-01-PLAN.md — Core scanner: file discovery, image hashing (aHash/dHash/pHash), progress events, duplicate grouping with triple-agreement matching
+- [x] 03-03-PLAN.md — Video scan support: ffmpeg-next dependency, video extensions, FileType enum in scan.rs
+- [x] 03-02-PLAN.md — Video hash support: ffmpeg frame extraction, per-frame hashing, videos_match(), compute_hashes_for_file()
+- [x] 03-04-PLAN.md — lib.rs integration: video routing in scan command, DashMap session state, cancel command, session wiring
 
 ---
 
