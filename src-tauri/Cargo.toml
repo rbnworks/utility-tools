@@ -26,3 +26,9 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 uuid = { version = "1", features = ["v4"] }
+image = "0.25"
+rayon = "1.10"
+tokio = { version = "1", features = ["full"] }
+walkdir = "2"
+tauri-plugin-shell = "2"
+dashmap = "6"
