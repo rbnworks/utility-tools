@@ -50,6 +50,11 @@
 
 **Requirements:** DF-INPUT-01, DF-INPUT-02, DF-INPUT-03, DF-INPUT-04, DF-INPUT-05, DF-INPUT-06, DF-INPUT-07
 
+**Plans:** 3 plans
+- [x] 02-01-PLAN.md — Install dependencies: Tauri JS packages, Rust plugins, shadcn/ui components
+- [x] 02-02-PLAN.md — Build FolderPicker (tracer) + ScanOptions components
+- [x] 02-03-PLAN.md — Wire DuplicateFinder orchestrator + ScanProgress component
+
 ---
 
 ## Phase 3: Duplicate Detection Engine
