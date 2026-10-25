@@ -75,6 +75,14 @@
 
 **Requirements:** DF-SCAN-01, DF-SCAN-02, DF-SCAN-03, DF-SCAN-04, DF-SCAN-05, DF-SCAN-06, DF-SCAN-07, DF-SCAN-08, DF-SCAN-09, HASH-01, HASH-02, HASH-03, HASH-04, HASH-05
 
+**Wave structure:** Wave 1 = 03-01 (core scanner), Wave 2 = 03-03 (scan.rs video support), Wave 3 = 03-02 (hash.rs video support), Wave 4 = 03-04 (combined lib.rs wiring)
+
+Plans:
+- [ ] 03-01-PLAN.md — Core scanner: file discovery, image hashing (aHash/dHash/pHash), progress events, duplicate grouping with triple-agreement matching
+- [ ] 03-03-PLAN.md — Video scan support: ffmpeg-next dependency, video extensions, FileType enum in scan.rs
+- [ ] 03-02-PLAN.md — Video hash support: ffmpeg frame extraction, per-frame hashing, videos_match(), compute_hashes_for_file()
+- [ ] 03-04-PLAN.md — lib.rs integration: video routing in scan command, DashMap session state, cancel command, session wiring
+
 ---
 
 ## Phase 4: Duplicate Results
