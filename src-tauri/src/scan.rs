@@ -7,16 +7,32 @@ pub const IMAGE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif",
 ];
 
+pub const VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "mov", "avi", "mkv", "webm",
+];
+
+pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif",
+    "mp4", "mov", "avi", "mkv", "webm",
+];
+
 pub const SKIP_DIRS: &[&str] = &[
     ".git", "node_modules", ".venv", "__pycache__", ".idea", ".vscode",
     "target", "dist", "build",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileType {
+    Image,
+    Video,
+}
 
 #[derive(Debug, Clone)]
 pub struct ScanFile {
     pub path: String,
     pub size: u64,
     pub extension: String,
+    pub file_type: FileType,
 }
 
 #[derive(Debug, Clone)]
@@ -35,8 +51,20 @@ pub struct ScanProgressEvent {
     pub file: String,
 }
 
-fn is_allowed_extension(ext: &str) -> bool {
+fn is_video_extension(ext: &str) -> bool {
+    VIDEO_EXTENSIONS
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case(ext))
+}
+
+fn is_image_extension(ext: &str) -> bool {
     IMAGE_EXTENSIONS
+        .iter()
+        .any(|e| e.eq_ignore_ascii_case(ext))
+}
+
+fn is_allowed_extension(ext: &str) -> bool {
+    SUPPORTED_EXTENSIONS
         .iter()
         .any(|e| e.eq_ignore_ascii_case(ext))
 }
@@ -125,10 +153,18 @@ pub fn discover_files(
                 seen.insert(canonical.clone(), ());
             }
 
+            // Determine file type
+            let file_type = if is_video_extension(&ext) {
+                FileType::Video
+            } else {
+                FileType::Image
+            };
+
             files.push(ScanFile {
                 path: canonical,
                 size,
                 extension: ext,
+                file_type,
             });
         }
     }
